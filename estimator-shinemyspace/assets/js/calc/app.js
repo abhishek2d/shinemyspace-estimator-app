@@ -118,7 +118,25 @@ function registerServiceWorker() {
     return;
   }
 
-  navigator.serviceWorker.register("sw.js").catch(() => {
+  // Deploy-friendly updates: when a newly deployed service worker takes control
+  // of a page that was ALREADY controlled, reload once so fresh JS/CSS replace
+  // any stale cached copies — nobody has to clear their cache after a deploy.
+  // The `controller` guard skips this on a first visit (page not yet controlled),
+  // and the `reloading` flag guards against reload loops.
+  if (navigator.serviceWorker.controller) {
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+  }
+
+  navigator.serviceWorker.register("sw.js").then((reg) => {
+    // Proactively check for a new version on each load so updates roll out
+    // promptly (the SW's skipWaiting + clients.claim then swap it in).
+    reg.update?.();
+  }).catch(() => {
     /* offline shell just won't be available; app still works online */
   });
 }

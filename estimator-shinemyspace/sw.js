@@ -10,7 +10,7 @@
  * instead of a stale cached copy.
  */
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE_NAME = `sms-estimator-${CACHE_VERSION}`;
 
 // The files that make up the app shell. Paths are relative to this file,
