@@ -37,9 +37,11 @@ window.handleCredentialResponse = async function (response) {
     return;
   }
 
-  // At the gate → verify with the server, then unlock and enter.
+  // At the gate → verify with the server, then unlock and enter. Verification
+  // hits the backend (which may be cold-starting), so show the busy spinner.
   const errorEl = $("login-error");
   if (errorEl) errorEl.textContent = "";
+  showGateBusy("Verifying your account…");
   try {
     await verifyAndUnlock(jwt);
     enterApp();
@@ -50,8 +52,23 @@ window.handleCredentialResponse = async function (response) {
         ? "You're offline. The first sign-in requires an internet connection."
         : err.message || "Sign-in failed. Please try again.";
     }
+  } finally {
+    hideGateBusy();
   }
 };
+
+/* The #busy overlay exists in the DOM from first paint, so the gate (before
+   ui.init runs) can drive it directly. */
+function showGateBusy(message) {
+  const busy = $("busy");
+  const text = $("busy-text");
+  if (text) text.textContent = message;
+  if (busy) busy.hidden = false;
+}
+function hideGateBusy() {
+  const busy = $("busy");
+  if (busy) busy.hidden = true;
+}
 
 let gateWarmTimer = null;
 
@@ -60,6 +77,17 @@ function enterApp() {
   $("login-gate").hidden = true;
   $("app").hidden = false;
   startApp();
+  hideSplash();
+}
+
+/** Fade out and remove the first-paint loading screen once the app is ready. */
+function hideSplash() {
+  const splash = $("splash");
+  if (!splash) return;
+  splash.classList.add("is-hidden");
+  splash.addEventListener("transitionend", () => splash.remove(), { once: true });
+  // Fallback in case the transition never fires (e.g. reduced-motion quirks).
+  setTimeout(() => splash.remove(), 600);
 }
 
 function startApp() {
@@ -140,6 +168,7 @@ function boot() {
   // they sign in — the sign-in call hits the server, and Render may be cold.
   $("login-gate").hidden = false;
   $("app").hidden = true;
+  hideSplash(); // reveal the sign-in gate
   ui.warmServer();
   gateWarmTimer = setInterval(() => ui.warmServer(), 180_000);
 }

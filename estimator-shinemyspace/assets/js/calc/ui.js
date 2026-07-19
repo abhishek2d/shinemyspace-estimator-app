@@ -19,12 +19,16 @@
 import * as state from "./state.js";
 import * as library from "./library.js";
 import * as items from "./items.js";
-import { computeEstimate, formatMoney, formatArea, KINDS } from "./calculator.js";
+import { computeEstimate, formatMoney, formatArea, toFeet, pricingBasis, KINDS } from "./calculator.js";
 import { API_URL } from "./config.js";
 import { hasFreshToken, getToken, getUser, awaitCredential, cancelPending, signOutGoogle, clearAccess } from "./auth.js";
 
 const $ = (id) => document.getElementById(id);
 let el = {}; // cached elements
+
+// Pending custom-dialog state (see showDialog / resolveDialog).
+let dialogResolve = null;
+let dialogButtons = [];
 
 /* Inline SVG icon — identical on every device (no emoji / icon font). */
 const ICON = {
@@ -38,6 +42,14 @@ const ICON = {
     '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>',
   lock:
     '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  // Publish → upload-to-cloud; Save-as-PDF → download. Both inherit the button
+  // text colour via currentColor (see index.html buttons).
+  publish:
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/></svg>',
+  pdf:
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  save:
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>',
 };
 
 export function init() {
@@ -76,8 +88,20 @@ export function init() {
     menuUserEmail: $("menu-user-email"),
     serverStatus: $("server-status"),
     serverLabel: document.querySelector("#server-status .server-label"),
+    dialogModal: $("dialog-modal"),
+    dialogTitle: $("dialog-title"),
+    dialogMessage: $("dialog-message"),
+    dialogInput: $("dialog-input"),
+    dialogActions: $("dialog-actions"),
+    busy: $("busy"),
+    busyText: $("busy-text"),
+    printBtn: $("print"),
   };
-  el.save.textContent = `💾 Save on this ${deviceWord()}`;
+  // Themed inline-SVG icons on the Save / Publish / Save-as-PDF buttons (single
+  // source of truth = ICON). currentColor makes them match each button's colour.
+  el.save.innerHTML = `${ICON.save} Save on this device`;
+  el.publishBtn.innerHTML = `${ICON.publish} Publish to Zoho`;
+  el.printBtn.innerHTML = `${ICON.pdf} Save as PDF`;
   wireEvents();
   setView("edit");
   renderAll();
@@ -97,14 +121,6 @@ export function init() {
   // Load the Zoho item catalogue for the surface search modal. Async — the
   // form is usable immediately; the modal shows items once it's ready.
   items.loadItems();
-}
-
-/** Best-effort device word for the Save button: phone / tablet / device. */
-function deviceWord() {
-  const ua = navigator.userAgent || "";
-  if (/iPhone|iPod|Windows Phone|Android.*Mobile/i.test(ua)) return "phone";
-  if (/iPad|Tablet|Android/i.test(ua)) return "tablet";
-  return "device";
 }
 
 export function renderAll() {
@@ -159,19 +175,28 @@ function roomCard(room, index) {
 function surfaceRow(surface) {
   const k = KINDS[surface.kind];
   const isSub = surface.kind === "subtract";
+  // Mode (Area vs Qty) is derived from the picked item's unit — there's no
+  // manual toggle. A surface with no item yet stays in Area (dimension) mode.
   const isUnit = surface.mode === "unit";
+  const unit = surface.dimUnit === "in" ? "in" : "ft";
   const itemName = (surface.itemName || "").trim();
-  // When an item is picked, its pricing type (sqft vs pcs/nos/…) fixes the mode,
-  // so lock the Area/Qty toggle to strictly follow the item.
-  const locked = !!surface.item_id;
 
-  // Area mode: Length × Width × rate/sqft. Unit mode: Quantity × rate/unit.
+  // Area mode: Length × Width (in ft or in) × rate/sqft. Qty mode: Qty × rate.
   const fields = isUnit
     ? `${field("Quantity", "qty", surface.qty)}
        ${field("Cost/unit", "costPerSqft", surface.costPerSqft)}`
-    : `${field(k.dim1, "dim1", surface.dim1)}
-       ${field(k.dim2, "dim2", surface.dim2)}
+    : `${dimField(k.dim1, "dim1", surface.dim1, unit)}
+       ${dimField(k.dim2, "dim2", surface.dim2, unit)}
        ${field("Cost/sqft", "costPerSqft", surface.costPerSqft)}`;
+
+  // In Area mode, let the user pick the unit their measurements are in. Qty mode
+  // has no dimensions, so no unit switch is shown.
+  const unitToggle = isUnit
+    ? ""
+    : `<div class="mode-toggle" role="group" aria-label="Measurement unit" title="Units your Length/Width are measured in">
+        <button class="mode-toggle__opt ${unit === "ft" ? "is-active" : ""}" data-action="dimunit" data-unit="ft" type="button">ft</button>
+        <button class="mode-toggle__opt ${unit === "in" ? "is-active" : ""}" data-action="dimunit" data-unit="in" type="button">in</button>
+      </div>`;
 
   const itemRow = itemName
     ? `<div class="surface__item">
@@ -189,10 +214,7 @@ function surfaceRow(surface) {
           <input class="surface__name" type="text" data-field="label" size="${sizeFor(surface.label, k.title)}"
                  value="${attr(surface.label)}" placeholder="${attr(k.title)}" aria-label="Surface name">
         </label>
-        <div class="mode-toggle ${locked ? "mode-toggle--locked" : ""}" role="group" aria-label="Measurement mode"${locked ? ' title="Set by the selected item"' : ""}>
-          <button class="mode-toggle__opt ${!isUnit ? "is-active" : ""}" data-action="mode" data-mode="area" type="button"${locked ? " disabled" : ""}>Area</button>
-          <button class="mode-toggle__opt ${isUnit ? "is-active" : ""}" data-action="mode" data-mode="unit" type="button"${locked ? " disabled" : ""}>Qty</button>
-        </div>
+        ${unitToggle}
         <button class="icon-btn icon-btn--delete" data-action="remove-surface" type="button" title="Delete this item" aria-label="Delete this item">${ICON.trash}</button>
       </div>
       <div class="surface__fields">
@@ -208,6 +230,28 @@ function field(label, name, value) {
       <input class="field__input" type="number" inputmode="decimal" min="0" step="any"
              data-field="${name}" value="${attr(value)}" placeholder="${attr(label)}" aria-label="${attr(label)}">
     </label>`;
+}
+
+/**
+ * A dimension input that knows its unit. When measuring in inches it shows a
+ * live "= N ft" equivalent above the field (updated on input by the rooms
+ * handler, keyed by data-conv), so it's clear what feeds the sqft calculation.
+ */
+function dimField(label, name, value, unit) {
+  const inInches = unit === "in";
+  return `
+    <label class="field field--dim">
+      <span class="field__conv" data-conv="${name}"${inInches ? "" : " hidden"}>${inInches ? convHint(value) : ""}</span>
+      <input class="field__input" type="number" inputmode="decimal" min="0" step="any"
+             data-field="${name}" value="${attr(value)}" placeholder="${attr(label)} (${unit})"
+             aria-label="${attr(label)} in ${inInches ? "inches" : "feet"}">
+    </label>`;
+}
+
+/** The "= N ft" helper text shown under an inch-mode dimension input. */
+function convHint(inchValue) {
+  const ft = toFeet(inchValue, "in");
+  return `= ${ft.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ft`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -234,8 +278,8 @@ function renderResults() {
     <div class="quote-summary">
       <div class="quote-summary__row">
         <div class="quote-summary__who">
-          <span class="quote-summary__label">Estimate for</span>
-          <span class="quote-summary__name">${model.customer ? esc(model.customer) : "Customer"}</span>
+          <span class="quote-summary__label">Estimate</span>
+          <span class="quote-summary__name">${model.customer ? esc(model.customer) : "Untitled"}</span>
         </div>
         <span class="quote-summary__date">${date}</span>
       </div>
@@ -259,6 +303,7 @@ function renderResults() {
           <table class="quote-table">
             <tbody>${rows}</tbody>
             <tfoot>
+              ${kindSubtotalRows(room)}
               <tr class="quote-total-row">
                 <td>Total <span class="quote-foot__area">· ${measures(room.area, room.qty)}</span></td>
                 <td class="num">${formatMoney(room.cost)}</td>
@@ -281,17 +326,22 @@ function resultRow(surface) {
   const sign = surface.isSubtract ? "−" : "";
   const itemName = (surface.itemName || "").trim();
   const rate = n(surface.costPerSqft).toLocaleString("en-IN");
+  const u = surface.dimUnit === "in" ? "in" : "ft";
   const detail = surface.isUnit
     ? `<div class="quote-item__dims">Qty ${n(surface.qty)}</div>
         <div class="quote-item__calc">@ ₹${rate}/unit</div>`
-    : `<div class="quote-item__dims">${k.dim1} ${n(surface.dim1)} × ${k.dim2} ${n(surface.dim2)} ft</div>
+    : `<div class="quote-item__dims">${k.dim1} ${n(surface.dim1)} × ${k.dim2} ${n(surface.dim2)} ${u}</div>
         <div class="quote-item__calc">${formatArea(surface.area)} · @ ₹${rate}/sqft</div>`;
+  const warn = surface.overDeduct
+    ? `<div class="quote-item__warn">Deduction is larger than this item's area in the room</div>`
+    : "";
   return `
-    <tr class="${surface.isSubtract ? "quote-row--sub" : ""}">
+    <tr class="${surface.isSubtract ? "quote-row--sub" : ""} ${surface.overDeduct ? "quote-row--over" : ""}">
       <td>
         <div class="quote-item__name">${esc(surface.label)}</div>
         ${itemName ? `<div class="quote-item__item">${esc(itemName)}</div>` : ""}
         ${detail}
+        ${warn}
       </td>
       <td class="num">${sign}${formatMoney(surface.cost)}</td>
     </tr>`;
@@ -303,7 +353,7 @@ function resultRow(surface) {
 function renderSaved() {
   const items = library.listSaved();
   if (!items.length) {
-    el.savedList.innerHTML = `<p class="muted">No saved estimates yet. Enter a customer name above and tap Save.</p>`;
+    el.savedList.innerHTML = `<p class="muted">No saved estimates yet. Enter an estimate name above and tap Save.</p>`;
     return;
   }
   el.savedList.innerHTML = items
@@ -347,8 +397,14 @@ function wireEvents() {
     const fieldInput = e.target.closest("[data-field]");
     if (fieldInput) {
       const { roomId, surfaceId } = ids(fieldInput);
-      state.updateSurface(roomId, surfaceId, fieldInput.dataset.field, fieldInput.value);
-      if (fieldInput.dataset.field === "label") autosize(fieldInput);
+      const fieldName = fieldInput.dataset.field;
+      state.updateSurface(roomId, surfaceId, fieldName, fieldInput.value);
+      if (fieldName === "label") autosize(fieldInput);
+      // Live "= N ft" under an inch-mode dimension, without a full re-render.
+      if (fieldName === "dim1" || fieldName === "dim2") {
+        const conv = fieldInput.closest(".field")?.querySelector(`[data-conv="${fieldName}"]`);
+        if (conv && !conv.hidden) conv.textContent = convHint(fieldInput.value);
+      }
       renderResults();
       return;
     }
@@ -361,7 +417,7 @@ function wireEvents() {
   });
 
   // Buttons inside rooms (add/remove)
-  el.rooms.addEventListener("click", (e) => {
+  el.rooms.addEventListener("click", async (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
     const { roomId, surfaceId } = ids(btn);
@@ -369,8 +425,8 @@ function wireEvents() {
       openItemModal(roomId, surfaceId);
       return;
     }
-    if (btn.dataset.action === "mode") {
-      state.updateSurface(roomId, surfaceId, "mode", btn.dataset.mode);
+    if (btn.dataset.action === "dimunit") {
+      state.updateSurface(roomId, surfaceId, "dimUnit", btn.dataset.unit);
       renderForm();
       renderResults();
       return;
@@ -384,13 +440,13 @@ function wireEvents() {
         state.updateSurface(roomId, surfaceId, "item_id", null);
         state.updateSurface(roomId, surfaceId, "itemName", "");
       },
-      "remove-room": () => {
-        if (!confirm("Delete this room? This cannot be undone.")) return;
+      "remove-room": async () => {
+        if (!(await confirmDialog("Delete this room? This cannot be undone.", { title: "Delete room", confirmLabel: "Delete", danger: true }))) return;
         state.removeRoom(roomId);
       },
     };
     if (actions[btn.dataset.action]) {
-      actions[btn.dataset.action]();
+      await actions[btn.dataset.action]();
       renderForm();
       renderResults();
     }
@@ -403,8 +459,8 @@ function wireEvents() {
     renderResults();
   });
 
-  el.newEstimate.addEventListener("click", () => {
-    if (confirm("Start a new, empty estimate? The current one will be cleared (saved estimates are kept).")) {
+  el.newEstimate.addEventListener("click", async () => {
+    if (await confirmDialog("Start a new, empty estimate? The current one will be cleared (saved estimates are kept).", { title: "New estimate", confirmLabel: "Start new" })) {
       state.reset();
       renderAll();
       setView("edit");
@@ -474,19 +530,19 @@ function wireEvents() {
   });
 
   // Saved list (open / delete)
-  el.savedList.addEventListener("click", (e) => {
+  el.savedList.addEventListener("click", async (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
     const name = btn.dataset.name;
     if (btn.dataset.action === "load-saved") {
-      if (!confirm(`Open "${name}"? This will replace the estimate you are currently editing.`)) return;
+      if (!(await confirmDialog(`Open "${name}"? This will replace the estimate you are currently editing.`, { title: "Open estimate", confirmLabel: "Open" }))) return;
       if (library.loadSaved(name)) {
         renderAll();
         setView("edit");
         toast(`Opened "${name}"`);
       }
     } else if (btn.dataset.action === "delete-saved") {
-      if (confirm(`Delete saved estimate "${name}"?`)) {
+      if (await confirmDialog(`Delete saved estimate "${name}"?`, { title: "Delete estimate", confirmLabel: "Delete", danger: true })) {
         library.deleteSaved(name);
         renderSaved();
         toast(`Deleted "${name}"`);
@@ -533,6 +589,55 @@ function wireEvents() {
       el.signinModal.hidden = true;
     }
   });
+
+  // Custom confirm/prompt dialog: a button click resolves with its value; the
+  // backdrop/✕ and Escape resolve as a dismiss; Enter fires the primary button.
+  el.dialogModal.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) return resolveDialog(null);
+    const btn = e.target.closest("[data-dialog-action]");
+    if (btn) resolveDialog(dialogButtons[Number(btn.dataset.dialogAction)]);
+  });
+  el.dialogInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const primary = dialogButtons.find((b) => b.variant === "primary");
+      if (primary) resolveDialog(primary);
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el.dialogModal.hidden) resolveDialog(null);
+  });
+
+  // Tuck the fixed total bar away while typing on touch devices — the on-screen
+  // keyboard otherwise floats it right over the field being edited. focusout is
+  // deferred so moving field-to-field doesn't flicker the bar.
+  const coarse = window.matchMedia("(pointer: coarse)");
+  const isTypingField = (t) =>
+    !!t && typeof t.matches === "function" &&
+    t.matches("input:not([type=button]):not([type=checkbox]):not([type=radio]), textarea, select");
+  document.addEventListener("focusin", (e) => {
+    if (coarse.matches && isTypingField(e.target)) el.totalBar.classList.add("totalbar--tucked");
+  });
+  document.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!isTypingField(document.activeElement)) el.totalBar.classList.remove("totalbar--tucked");
+    }, 0);
+  });
+
+  // Freeze the background while any modal is open. Modals toggle their `hidden`
+  // attribute in many places, so rather than touch each site we watch them all
+  // and flip `body.modal-open` whenever at least one is visible. This stops a
+  // touch-scroll in the item list from moving the form behind the sheet.
+  const modals = document.querySelectorAll(".modal");
+  const syncModalOpen = () => {
+    const anyOpen = Array.from(modals).some((m) => !m.hidden);
+    document.body.classList.toggle("modal-open", anyOpen);
+  };
+  const modalObserver = new MutationObserver(syncModalOpen);
+  modals.forEach((m) =>
+    modalObserver.observe(m, { attributes: true, attributeFilter: ["hidden"] })
+  );
+  syncModalOpen();
 }
 
 /**
@@ -587,8 +692,40 @@ function closeItemModal() {
   pickTarget = { roomId: null, surfaceId: null };
 }
 
+/** The surface the item picker is currently open for, with its room id. */
+function currentPickSurface() {
+  const { roomId, surfaceId } = pickTarget;
+  if (!roomId || !surfaceId) return null;
+  const room = state.getState().rooms.find((r) => r.id === roomId);
+  const surface = room?.surfaces.find((s) => s.id === surfaceId);
+  return surface ? { roomId, surface } : null;
+}
+
+/** Item ids used by the ceilings/walls of a room — the items a deduct may net against. */
+function roomParentItemIds(roomId) {
+  const room = state.getState().rooms.find((r) => r.id === roomId);
+  const set = new Set();
+  room?.surfaces.forEach((s) => {
+    if (s.kind !== "subtract" && s.item_id) set.add(s.item_id);
+  });
+  return set;
+}
+
 function renderItemResults(query) {
-  const list = items.search(query);
+  let list = items.search(query);
+  // A deduct can only net against an item already used by a ceiling/wall in the
+  // same room, so restrict its picker to those items (and guide the user if the
+  // room has none yet).
+  const target = currentPickSurface();
+  if (target && target.surface.kind === "subtract") {
+    const allowed = roomParentItemIds(target.roomId);
+    if (!allowed.size) {
+      el.itemResults.innerHTML =
+        `<li class="item-row item-row--empty">Add a ceiling or wall with an item first, then deduct from it.</li>`;
+      return;
+    }
+    list = list.filter((it) => allowed.has(it.item_id));
+  }
   if (!list.length) {
     el.itemResults.innerHTML = `<li class="item-row item-row--empty">No items found</li>`;
     return;
@@ -607,18 +744,11 @@ function renderItemResults(query) {
 }
 
 /**
- * The measurement mode implied by a Zoho item's unit: square-area units
- * (sqft, sq. ft., sqm, …) → "area" (Length × Width); anything else
- * (pcs, nos, set, box, …) → "unit" (Qty). Returns null for an unknown/blank
- * unit so we leave the current mode untouched.
+ * Apply the chosen item to the target surface: name, rate, unit, id, and the
+ * mode its pricing implies. Integrity guard: an item the app can't price safely
+ * (per-length units — see pricingBasis) is refused here so a bad quantity can
+ * never reach a surface or Zoho.
  */
-function modeForUnit(unit) {
-  const u = String(unit || "").toLowerCase().replace(/[^a-z]/g, "");
-  if (!u) return null;
-  return u.startsWith("sq") || u.startsWith("square") ? "area" : "unit";
-}
-
-/** Apply the chosen item to the target surface: name, rate, id, and its mode. */
 function selectItem(itemId) {
   const item = items.findById(itemId);
   const { roomId, surfaceId } = pickTarget;
@@ -626,12 +756,25 @@ function selectItem(itemId) {
     closeItemModal();
     return;
   }
+
+  const basis = pricingBasis(item.unit); // "area" | "count" | "linear"
+  if (basis === "linear") {
+    closeItemModal();
+    toast(
+      `"${item.name}" is priced per ${item.unit} (a length). Measuring by length ` +
+        `isn't supported yet — pick a per-sqft or per-piece item.`,
+      { error: true }
+    );
+    return;
+  }
+
   state.updateSurface(roomId, surfaceId, "item_id", item.item_id);
   state.updateSurface(roomId, surfaceId, "itemName", item.name);
+  state.updateSurface(roomId, surfaceId, "itemUnit", item.unit || "");
   state.updateSurface(roomId, surfaceId, "costPerSqft", item.rate);
-  // Strictly follow the item's pricing type for the Area/Qty mode.
-  const mode = modeForUnit(item.unit);
-  if (mode) state.updateSurface(roomId, surfaceId, "mode", mode);
+  // Strictly follow the item's pricing type: area units → Area (L×W), everything
+  // else → Qty. Keeps the billed quantity matched to what the item sells by.
+  state.updateSurface(roomId, surfaceId, "mode", basis === "area" ? "area" : "unit");
   closeItemModal();
   renderForm();
   renderResults();
@@ -678,7 +821,7 @@ function updateAuthUI() {
   if (!canPublish) {
     el.publishHint.textContent = !online
       ? "You're offline. Please reconnect to the internet to publish to Zoho Books."
-      : "Please sign in to publish to Zoho Books — use the menu (☰) at the top-right.";
+      : "Please sign in to publish to Zoho Books — use the menu at the top-right.";
   }
 }
 
@@ -765,7 +908,7 @@ function toggleMenu() {
 /** Menu → Sign out of / Sign in to Google. Never ends the local app access. */
 async function handleAuthToggle() {
   if (hasFreshToken()) {
-    if (!confirm("Sign out?\nThe app stays available offline — sign in again only when you want to publish.")) return;
+    if (!(await confirmDialog("The app stays available offline — sign in again only when you want to publish.", { title: "Sign out?", confirmLabel: "Sign out" }))) return;
     signOutGoogle();
     updateAuthUI();
     toast("Signed out");
@@ -800,8 +943,13 @@ async function syncItems() {
     if (err.message !== "Sign-in cancelled") toast(err.message || "Please sign in to refresh items.", { error: true });
     return;
   }
-  toast("Refreshing items…");
-  const count = await items.refreshLive(token, { force: true });
+  showBusy("Refreshing items…");
+  let count;
+  try {
+    count = await items.refreshLive(token, { force: true });
+  } finally {
+    hideBusy();
+  }
   if (count) {
     toast(`Items updated — ${count} items.`);
     if (!el.itemModal.hidden) renderItemResults(el.itemSearch.value);
@@ -907,31 +1055,187 @@ function itemsListRow(it) {
 }
 
 /** Menu → Lock app: clears app access + token, returns to the login screen. */
-function lockApp() {
-  if (!confirm("Lock the app?\nYou'll need to sign in with Google again to unlock (requires an internet connection).")) return;
+async function lockApp() {
+  if (!(await confirmDialog("You'll need to sign in with Google again to unlock (requires an internet connection).", { title: "Lock the app?", confirmLabel: "Lock" }))) return;
   clearAccess();
   signOutGoogle();
   window.location.reload();
 }
 
-/** Save the current estimate on this device under a name (prompts for one). */
-function saveEstimate() {
-  const suggested = el.customer.value.trim();
-  const name = (prompt(
-    'Save this estimate as:\n(Tip: add a label to keep different versions for the same customer — e.g. "Mr Singh — with false ceiling")',
-    suggested
-  ) || "").trim();
-  if (!name) {
-    // Empty or cancelled — only nag if they actually confirmed an empty name.
+/**
+ * Custom modal dialog — replaces native confirm()/prompt() so popups match the
+ * app and behave on mobile. Resolves with the chosen button object (which may
+ * carry a `.value` read from the input when present), or null if dismissed.
+ *
+ *   showDialog({
+ *     title, message,
+ *     input: { value, placeholder },              // omit for a plain confirm
+ *     buttons: [{ label, value, variant }],       // variant: primary|secondary|ghost
+ *   })
+ */
+function showDialog({ title = "", message = "", input = null, buttons = [] }) {
+  return new Promise((resolve) => {
+    resolveDialog(null); // clear any dialog already open
+    dialogResolve = resolve;
+    dialogButtons = buttons;
+
+    el.dialogTitle.textContent = title;
+    el.dialogMessage.textContent = message;
+
+    if (input) {
+      el.dialogInput.hidden = false;
+      el.dialogInput.value = input.value || "";
+      el.dialogInput.placeholder = input.placeholder || "";
+    } else {
+      el.dialogInput.hidden = true;
+      el.dialogInput.value = "";
+    }
+
+    el.dialogActions.innerHTML = buttons
+      .map(
+        (b, i) =>
+          `<button type="button" class="btn btn--${b.variant || "secondary"}" data-dialog-action="${i}">${esc(b.label)}</button>`
+      )
+      .join("");
+
+    el.dialogModal.hidden = false;
+    if (input) {
+      el.dialogInput.focus();
+      el.dialogInput.select();
+    } else {
+      el.dialogActions.querySelector("[data-dialog-action]")?.focus();
+    }
+  });
+}
+
+/**
+ * Yes/no confirmation using the custom dialog. Resolves true only if the user
+ * taps the confirm button. `danger` styles it as a destructive (red) action.
+ */
+async function confirmDialog(message, { title = "", confirmLabel = "OK", danger = false } = {}) {
+  const res = await showDialog({
+    title,
+    message,
+    buttons: [
+      { label: "Cancel", value: "cancel", variant: "ghost" },
+      { label: confirmLabel, value: "ok", variant: danger ? "danger" : "primary" },
+    ],
+  });
+  return res?.action === "ok";
+}
+
+/**
+ * Close the dialog and settle its promise. Resolves null if dismissed, else
+ * { action, value? } where `action` is the clicked button's value and `value`
+ * is the input text (only when the dialog has an input). Keeping the two apart
+ * means a Cancel with a pre-filled input is never mistaken for a Save.
+ */
+function resolveDialog(button) {
+  if (!dialogResolve) return;
+  const done = dialogResolve;
+  dialogResolve = null;
+  el.dialogModal.hidden = true;
+  if (!button) return done(null);
+  const result = { action: button.value };
+  if (!el.dialogInput.hidden) result.value = el.dialogInput.value.trim();
+  done(result);
+}
+
+/**
+ * Save the current estimate on this device. Defaults silently to the estimate
+ * name — no popup when that name is free. Only when it's already saved do we
+ * ask: overwrite it, or keep both by saving a new copy under an edited name
+ * (pre-filled with a numbered suffix). Choosing a copy name also updates the
+ * estimate-name field so the form reflects what was saved.
+ */
+async function saveEstimate() {
+  const savedNames = () => library.listSaved().map((it) => it.name);
+  const commit = (name, msg) => {
+    library.saveCurrent(name, new Date().toISOString());
+    renderSaved();
+    toast(msg);
+  };
+
+  // Prompt for a name only when the field is empty (nothing to default to).
+  let base = el.customer.value.trim();
+  if (!base) {
+    const res = await showDialog({
+      title: "Name this estimate",
+      input: { value: "", placeholder: "e.g. Abhishek Singh - 1" },
+      buttons: [
+        { label: "Cancel", value: "cancel", variant: "ghost" },
+        { label: "Save", value: "save", variant: "primary" },
+      ],
+    });
+    if (!res || res.action !== "save") return;
+    base = (res.value || "").trim();
+    if (!base) return;
+    setEstimateName(base);
+  }
+
+  // Free name — save straight away, no confirmation.
+  if (!savedNames().includes(base)) {
+    commit(base, `Saved "${base}"`);
     return;
   }
-  const exists = library.listSaved().some((it) => it.name === name);
-  if (exists && !confirm(`"${name}" is already saved. Update it with the current details?`)) {
+
+  // Name is taken — overwrite, keep both (new copy), or cancel.
+  const choice = await showDialog({
+    title: "Already saved",
+    message: `"${base}" already exists. Overwrite it, or keep both by saving a new copy?`,
+    buttons: [
+      { label: "Cancel", value: "cancel", variant: "ghost" },
+      { label: "Save new copy", value: "copy", variant: "secondary" },
+      { label: "Overwrite", value: "overwrite", variant: "primary" },
+    ],
+  });
+  if (!choice || choice.action === "cancel") return;
+
+  if (choice.action === "overwrite") {
+    commit(base, `Updated "${base}"`);
     return;
   }
-  library.saveCurrent(name, new Date().toISOString());
-  renderSaved();
-  toast(exists ? `Updated "${name}"` : `Saved "${name}"`);
+
+  // New copy — pre-fill a suffixed name (e.g. "Abhishek Singh (2)"). Strip any
+  // existing "(N)" from the base first so repeated copies number flatly
+  // ((2), (3), (4)) instead of nesting ("X (2) (2)").
+  const root = base.replace(/\s*\(\d+\)\s*$/, "").trim() || base;
+  const res = await showDialog({
+    title: "Save as a new copy",
+    message: "Give this copy its own name.",
+    input: { value: uniqueSavedName(root), placeholder: "Estimate name" },
+    buttons: [
+      { label: "Cancel", value: "cancel", variant: "ghost" },
+      { label: "Save copy", value: "save", variant: "primary" },
+    ],
+  });
+  if (!res || res.action !== "save") return;
+  const name = (res.value || "").trim();
+  if (!name) return;
+
+  // As soon as the copy name is set, mirror it into the estimate-name field.
+  setEstimateName(name);
+
+  if (savedNames().includes(name)) {
+    const ow = await showDialog({
+      title: "Already saved",
+      message: `"${name}" already exists. Overwrite it?`,
+      buttons: [
+        { label: "Cancel", value: "cancel", variant: "ghost" },
+        { label: "Overwrite", value: "overwrite", variant: "primary" },
+      ],
+    });
+    if (!ow || ow.action !== "overwrite") return;
+    commit(name, `Updated "${name}"`);
+    return;
+  }
+  commit(name, `Saved "${name}"`);
+}
+
+/** Set the estimate-name field and keep state in sync. */
+function setEstimateName(name) {
+  el.customer.value = name;
+  state.setCustomer(name);
 }
 
 /**
@@ -943,22 +1247,55 @@ async function publishToZoho() {
   const model = computeEstimate(state.getState());
   const lineItems = [];
   let unlinkedCount = 0; // publishable surfaces (incl. deducts) with no catalogue item
-  model.rooms.forEach((room) => {
-    room.surfaces.forEach((s) => {
-      // Magnitude: qty for unit-mode, area (sqft) for area-mode. Deducts are
-      // sent as a NEGATIVE quantity so the backend subtracts them from the
-      // matching item's aggregated line.
-      const magnitude = Number((s.isUnit ? s.qty : s.area).toFixed(2));
-      if (!magnitude) return; // no size — skip
-      if (!s.item_id) unlinkedCount += 1; // every surface (incl. deducts) needs an item
-      lineItems.push({
-        item_id: s.item_id || undefined,
-        name: (s.itemName || s.label || "").trim() || undefined,
-        quantity: s.isSubtract ? -magnitude : magnitude,
-        rate: n(s.costPerSqft),
+  const blocked = []; // surfaces whose item can't be priced safely (integrity guard)
+  const overDeducted = []; // deducts bigger than their item's area in the room
+  try {
+    model.rooms.forEach((room) => {
+      room.surfaces.forEach((s) => {
+        // pricedQty is computed once in calculator.js (area for area-mode, qty
+        // for qty-mode) so the published quantity is exactly what's on screen.
+        const magnitude = Number(n(s.pricedQty).toFixed(2));
+        if (!magnitude) return; // no size — skip
+        if (s.overDeduct) overDeducted.push((s.itemName || s.label || "an item").trim());
+        if (!s.item_id) unlinkedCount += 1; // every surface (incl. deducts) needs an item
+        // Integrity: refuse a surface whose linked item's unit we can't bill
+        // against what was measured (e.g. a per-length item). Better to stop
+        // than to publish a wrong quantity.
+        if (s.item_id && s.pricingOk === false) {
+          blocked.push((s.itemName || s.label || "an item").trim());
+          return;
+        }
+        if (!Number.isFinite(magnitude)) throw new Error(`Bad quantity for "${s.label}"`);
+        lineItems.push({
+          item_id: s.item_id || undefined,
+          name: (s.itemName || s.label || "").trim() || undefined,
+          quantity: s.isSubtract ? -magnitude : magnitude,
+          rate: n(s.costPerSqft),
+          // Room so the server can group per room and label each line's
+          // description (the Qty column carries the quantity; no dimensions).
+          room: room.displayName,
+        });
       });
     });
-  });
+  } catch (err) {
+    // Final catch-all: anything unexpected in building the lines stops the
+    // publish rather than sending Zoho something wrong.
+    console.error("[Publish] Could not build line items:", err);
+    toast("Something looks off in this estimate — couldn't prepare it for Zoho. Please review and try again.", { error: true });
+    return;
+  }
+
+  if (blocked.length) {
+    const names = [...new Set(blocked)].join(", ");
+    toast(`Can't publish: ${names} — the item's pricing unit doesn't match how it's measured. Fix the item or remove it.`, { error: true });
+    return;
+  }
+
+  if (overDeducted.length) {
+    const names = [...new Set(overDeducted)].join(", ");
+    toast(`Can't publish: the deduction for ${names} is larger than that item's area in the room. Reduce the deduction.`, { error: true });
+    return;
+  }
 
   if (!lineItems.length) {
     toast("Please add at least one item with a size before publishing.", { error: true });
@@ -976,8 +1313,7 @@ async function publishToZoho() {
   // keep the local copy (already saved above) but don't publish.
   if (unlinkedCount > 0) {
     toast(
-      `Saved on this device. ${unlinkedCount} surface${unlinkedCount > 1 ? "s" : ""} ` +
-        `require a selected item (🔍) before publishing to Zoho Books.`,
+      "Saved on this device. Please select an item for every entry before publishing to Zoho Books.",
       { error: true }
     );
     return;
@@ -1004,6 +1340,9 @@ async function publishToZoho() {
   const original = el.publishBtn.innerHTML;
   el.publishBtn.disabled = true;
   el.publishBtn.textContent = "Publishing…";
+  // Full-screen spinner — the backend may be cold-starting (Render), so this can
+  // take a few seconds; the overlay makes the wait read as progress, not a hang.
+  showBusy("Publishing to Zoho Books…");
   try {
     const res = await fetch(`${API_URL}/api/quotes`, {
       method: "POST",
@@ -1017,10 +1356,11 @@ async function publishToZoho() {
     if (!res.ok) throw new Error(data.error || "Publishing failed");
     // Stay in the app — not every user has Zoho access, so we just confirm
     // success rather than opening the Zoho estimate page.
-    toast("Estimate published to Zoho Books ✓");
+    toast("Estimate published to Zoho Books");
   } catch (err) {
     toast(err.message || "Unable to reach the server. Please try again.", { error: true });
   } finally {
+    hideBusy();
     el.publishBtn.innerHTML = original;
     updateAuthUI(); // restore the correct enabled/disabled state
   }
@@ -1055,6 +1395,19 @@ function ids(node) {
     roomId: roomEl ? roomEl.dataset.roomId : null,
     surfaceId: surfaceEl ? surfaceEl.dataset.surfaceId : null,
   };
+}
+
+/**
+ * Blocking activity overlay for backend waits (publish, refresh items). Shows a
+ * spinner + message so a slow request (e.g. Render's cold start) reads as
+ * "working", not "stuck". Always pair showBusy() with hideBusy() in a finally.
+ */
+function showBusy(message = "Working…") {
+  el.busyText.textContent = message;
+  el.busy.hidden = false;
+}
+function hideBusy() {
+  el.busy.hidden = true;
 }
 
 let toastTimer = null;
@@ -1103,6 +1456,38 @@ function measures(area, qty) {
   if (area > 0) parts.push(formatArea(area));
   if (qty > 0) parts.push(`${qty.toLocaleString("en-IN")} qty`);
   return parts.length ? parts.join(" / ") : formatArea(area);
+}
+
+// Per-surface-type subtotal rows for a room footer (Ceiling / Walls / Deducts).
+// Shown only when a room mixes types, so a single-type room isn't just a
+// duplicate of its Total line. Subtract kinds render negative and reconcile to
+// the room Total below them.
+const KIND_LABELS = { ceiling: "Ceiling", wall: "Walls", subtract: "Deducts" };
+function kindSubtotalRows(room) {
+  const kinds = Object.keys(KINDS).filter((k) => room.byKind[k]);
+  if (kinds.length < 2) return "";
+  return kinds
+    .map((k) => {
+      const b = room.byKind[k];
+      return `<tr class="quote-subtotal-row quote-subtotal-row--${k}">
+                <td>${KIND_LABELS[k] || KINDS[k].title} <span class="quote-foot__area">· ${measuresSigned(b.area, b.qty)}</span></td>
+                <td class="num">${moneySigned(b.cost)}</td>
+              </tr>`;
+    })
+    .join("");
+}
+
+/** Like measures(), but keeps a sign so deduct subtotals read as negative. */
+function measuresSigned(area, qty) {
+  const parts = [];
+  if (area) parts.push((area < 0 ? "−" : "") + formatArea(Math.abs(area)));
+  if (qty) parts.push((qty < 0 ? "−" : "") + `${Math.abs(qty).toLocaleString("en-IN")} qty`);
+  return parts.length ? parts.join(" / ") : formatArea(0);
+}
+
+/** Money with an explicit minus for negatives, e.g. -1200 → "−₹1,200". */
+function moneySigned(value) {
+  return (value < 0 ? "−" : "") + formatMoney(Math.abs(value));
 }
 
 function esc(str) {

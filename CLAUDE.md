@@ -23,8 +23,12 @@ publishing creates real Zoho estimates. Both are deployed (Render backend, Hosti
 
 ## Zoho rules (in `routes/quotes.js` / `routes/items.js`)
 - Items are filtered to **active + sellable** (`can_be_sold === true`); inactive/purchase-only never reach the picker.
-- Picking an item locks the Area/Qty mode to the item's unit; lines are **aggregated by item**;
-  **deducts** are negative quantities that net out; every surface must have an item to publish.
+- Picking an item sets the Area/Qty mode from the item's unit (no manual toggle); lines are
+  **aggregated by (room, item)** — same-item surfaces merge within a room, rooms stay separate;
+  **deducts** are negative quantities that net into their item's line within the room; every
+  surface must have an item to publish. Each Zoho line's `description` = room name + blank line +
+  the item's Zoho master process text (re-added via `getItemById`, since supplying a description
+  replaces Zoho's default). No per-surface dimensions — the Qty column carries the quantity.
 - Estimates use a fixed `ZOHO_SYSTEM_CONTACT_ID`; creator email → `salesperson_name`.
 - Zoho **Self Client**, minimal scopes `ZohoBooks.items.READ,ZohoBooks.estimates.CREATE`.
 
