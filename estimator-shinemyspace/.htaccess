@@ -3,6 +3,17 @@
 #  This is served-folder configuration only — it runs no application code.
 # ============================================================
 
+# ── Canonical host: serve ONLY from estimator.shinemyspace.com ──
+# On Hostinger the subdomain's document root is the same folder that is also
+# reachable as https://shinemyspace.com/estimator/. That exposes the app on two
+# URLs. Redirect any request NOT arriving via the estimator subdomain to the
+# canonical address, so the main-domain /estimator/ path no longer serves it.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} !^(www\.)?estimator\.shinemyspace\.com$ [NC]
+  RewriteRule ^(.*)$ https://estimator.shinemyspace.com/$1 [R=301,L]
+</IfModule>
+
 <IfModule mod_headers.c>
   # REQUIRED for Google Sign-In: the sign-in popup posts the credential back to
   # this page, which needs COOP = same-origin-allow-popups. COOP can ONLY be an

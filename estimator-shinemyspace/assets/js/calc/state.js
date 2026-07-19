@@ -54,22 +54,29 @@ function makeRoom() {
 function makeSurface(kind) {
   // label   = the editable surface name (defaults to the kind, e.g. "Ceiling").
   // mode    = "area" (Length × Width × rate/sqft) or "unit" (Qty × rate/unit).
+  //           Derived from the picked item's selling unit; no manual toggle.
+  // dimUnit = the unit the Length/Width inputs are typed in: "ft" or "in".
+  //           Area is always computed in sqft (inches are ÷12 before squaring),
+  //           so the priced quantity matches the input whichever unit is used.
   // qty     = the quantity used in "unit" mode.
-  // item_id + itemName link this surface to a Zoho item when one is picked
-  // (null / "" = a plain manual entry). These are additive, optional fields,
-  // so estimates saved before they existed still load fine (missing mode reads
-  // as "area", missing qty as "").
+  // item_id + itemName + itemUnit link this surface to a Zoho item when one is
+  // picked (null / "" = a plain manual entry); itemUnit is kept so pricing can
+  // be re-validated at publish. These are additive, optional fields, so
+  // estimates saved before they existed still load fine (missing mode reads as
+  // "area", missing dimUnit as "ft", missing qty as "").
   return {
     id: nextId("s"),
     kind,
     label: "",
     mode: "area",
+    dimUnit: "ft",
     dim1: "",
     dim2: "",
     qty: "",
     costPerSqft: "",
     item_id: null,
     itemName: "",
+    itemUnit: "",
   };
 }
 

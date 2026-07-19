@@ -81,6 +81,23 @@ function isQuotable(it) {
   return (it.status || 'active') === 'active' && it.can_be_sold === true;
 }
 
+/**
+ * Look up one Zoho item (the full object, incl. its `description` / process
+ * text) by id, using the shared in-memory cache and fetching once if it's cold.
+ * Used by the quotes route to enrich each estimate line. Returns null if the
+ * item can't be found or Zoho is unreachable.
+ */
+export async function getItemById(itemId) {
+  if (!itemId) return null;
+  try {
+    const all = await fetchItemsFromZoho(false);
+    return all.find((it) => String(it.item_id) === String(itemId)) || null;
+  } catch (err) {
+    console.warn('[Items] getItemById lookup failed:', err.message);
+    return null;
+  }
+}
+
 router.get('/', verifyGoogleToken, async (req, res) => {
   try {
     // ?fresh=1 forces a re-pull from Zoho (used by the "Refresh items" action

@@ -104,10 +104,14 @@ function roomDetail(room) {
     .map((surface) => {
       const k = KINDS[surface.kind];
       const sign = surface.isSubtract ? "−" : "";
+      const u = surface.dimUnit === "in" ? "in" : "ft";
+      const measure = surface.isUnit
+        ? `Qty ${n(surface.qty)}`
+        : `${k.dim1} ${n(surface.dim1)} ${u} × ${k.dim2} ${n(surface.dim2)} ${u} &nbsp;·&nbsp; ${surface.area.toFixed(2)} sq.ft.`;
       return `
         <tr class="${surface.isSubtract ? "q-row--sub" : ""}">
           <td>${esc(surface.label)}</td>
-          <td>${k.dim1} ${n(surface.dim1)} ft × ${k.dim2} ${n(surface.dim2)} ft &nbsp;·&nbsp; ${surface.area.toFixed(2)} sq.ft.</td>
+          <td>${measure}</td>
           <td class="num">${sign}${formatMoney(surface.cost)}</td>
         </tr>`;
     })

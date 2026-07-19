@@ -87,10 +87,10 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 .btn--secondary:hover { background: #f8fafc; }
 .btn--ghost     { background: #fff; color: var(--brand); border-color: #c7d6f5; }
 .btn--ghost:hover { background: #f3f7ff; }
+.btn--danger    { background: #dc2626; }
+.btn--danger:hover { background: #b91c1c; }
 .btn--ok        { background: #fff; color: var(--ok); border-color: #bbf7d0; }
 .btn--ok:hover  { background: #f0fdf4; }
-/* Small logo shown inside a button (e.g. the Zoho Books logo on Publish). */
-.btn__logo { height: 18px; width: auto; vertical-align: middle; margin-right: 6px; }
 /* Soft "add" button — clearly an add affordance, not a loud solid block. */
 .btn--add       { background: #eaf1ff; color: var(--brand-700); border: 1px dashed #a9c1f2; }
 .btn--add:hover { background: #dfe8ff; border-color: var(--brand); }
@@ -310,6 +310,16 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 
 /* fields */
 .field { display: flex; flex-direction: column; gap: 5px; }
+/* Live "= N ft" shown above an inch-mode dimension input. */
+.field__conv {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-700, var(--brand));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .field--full { width: 100%; }
 .field__label { font-size: 12px; color: var(--muted); font-weight: 600; }
 .field__input {
@@ -341,9 +351,19 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;   /* clearer gap between rooms when scrolling */
+  overflow: hidden;      /* clip the header band to the card's rounded corners */
 }
-.room__head { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; padding-right: 40px; }
+/* Tinted title bar spanning the top of the card — a strong "this room starts
+   here" marker so rooms are easy to tell apart while scrolling fast. */
+.room__head {
+  display: flex; gap: 8px; align-items: center;
+  margin: -16px -16px 16px;
+  padding: 10px 44px 10px 14px;
+  background: #eef1f6;
+  border-bottom: 2px solid #c8d3e3;
+}
+.room__name { color: var(--navy); }
 .room__title { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; cursor: text; }
 .room__name {
   flex: 0 1 auto;
@@ -369,7 +389,9 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
   padding: 14px 14px 16px;
 }
 .surface--subtract { background: var(--sub-bg); border-color: var(--sub-line); }
-.surface__top { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; padding-right: 44px; }
+/* gap spaces the name from the ft/in toggle; padding-right keeps the toggle
+   clear of the absolutely-positioned delete button so neither is mis-tapped. */
+.surface__top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-right: 54px; }
 /* Area | Qty measurement-mode toggle, right-aligned before the delete icon. */
 .mode-toggle { display: inline-flex; margin-left: auto; flex: 0 0 auto; background: #eef2f8; border-radius: 8px; padding: 2px; }
 .mode-toggle__opt {
@@ -392,15 +414,16 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
   min-width: 50px;
   min-height: 34px;
   padding: 4px 8px;
-  /* Keep at 16px so focusing the name field doesn't trigger mobile zoom. */
-  font-size: 16px;
-  font-weight: 700;
+  /* Displays at 14px, but jumps to 16px on focus (below) so iOS doesn't
+     auto-zoom the moment you tap it to edit. */
+  font-size: 14px;
+  font-weight: 600;
   color: var(--ink);
   border: 1px solid transparent;
   border-radius: 9px;
   background: transparent;
 }
-.surface__name:focus { outline: none; background: #fff; box-shadow: var(--ring); border-color: var(--brand); }
+.surface__name:focus { outline: none; background: #fff; box-shadow: var(--ring); border-color: var(--brand); font-size: 16px; }
 /* The linked Zoho item, shown quietly below the measurements: a red ✕ clear
    button then "Item: <name>". */
 /* Item area below the measurements. With no item linked it shows a clear
@@ -444,6 +467,8 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 
 .primary-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px; }
 .primary-actions .btn { flex: 1 1 auto; }
+/* Publish + Save-as-PDF: always equal width (id beats the wide-screen override). */
+#view-summary .primary-actions .btn { flex: 1 1 0; }
 
 .data-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .data-actions > .btn { flex: 1 1 auto; }
@@ -526,6 +551,9 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 .quote-item__calc { font-size: 12px; color: #4e8078; margin-top: 2px; padding-left: 10px; }
 .quote-row--sub .quote-item__name,
 .quote-row--sub td.num { color: var(--danger); }
+/* A deduction bigger than its item's area in the room — flag the row. */
+.quote-row--over td { background: var(--sub-bg); }
+.quote-item__warn { margin-top: 4px; padding-left: 10px; font-size: 12px; font-weight: 600; color: var(--danger); }
 .quote-table tfoot td { background: #fafbfc; font-weight: 700; color: var(--muted); border-bottom: none; }
 .quote-table tfoot td.num { color: var(--navy); }
 /* Single footer row: "Room total · <area>" (area not highlighted) on the left,
@@ -533,6 +561,20 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 .quote-table tfoot tr.quote-total-row td { color: var(--ink); }
 .quote-table tfoot tr.quote-total-row td.num { color: var(--navy); font-weight: 800; }
 .quote-foot__area { font-weight: 400; color: var(--muted); font-size: 0.8em; }
+/* Per-type subtotal rows (Ceiling / Walls / Deducts) above the room Total:
+   lighter than the Total, with a subtle divider before the Total row. */
+.quote-table tfoot tr.quote-subtotal-row td { padding-top: 7px; padding-bottom: 7px; font-weight: 600; color: var(--muted); font-size: 13px; }
+.quote-table tfoot tr.quote-subtotal-row td.num { color: var(--muted); font-weight: 700; }
+.quote-table tfoot tr.quote-subtotal-row + tr.quote-total-row td { border-top: 1px solid #e6ebf2; }
+/* Gentle, desaturated tint per type so the eye groups each row without loud
+   contrast — cool tones for the additive types, a soft rose for deductions.
+   Selectors carry the full tfoot prefix so they beat the muted colour above. */
+.quote-table tfoot tr.quote-subtotal-row--ceiling  td:first-child,
+.quote-table tfoot tr.quote-subtotal-row--ceiling  td.num  { color: #4471b0; }   /* blue */
+.quote-table tfoot tr.quote-subtotal-row--wall     td:first-child,
+.quote-table tfoot tr.quote-subtotal-row--wall     td.num  { color: #2f8a7c; }   /* teal */
+.quote-table tfoot tr.quote-subtotal-row--subtract td:first-child,
+.quote-table tfoot tr.quote-subtotal-row--subtract td.num  { color: #c05468; }   /* rose */
 
 /* 10. Total bar ---------------------------------------------------- */
 .totalbar {
@@ -548,18 +590,24 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
   background: linear-gradient(120deg, var(--navy) 0%, var(--navy-900) 100%);
   color: #fff;
   box-shadow: 0 -4px 18px rgba(15, 23, 42, .25);
+  transition: transform .2s ease;
 }
+/* On touch devices the on-screen keyboard lifts this fixed bar right over the
+   field being edited. Slide it out of the way while a field is focused. */
+.totalbar--tucked { transform: translateY(130%); }
 .totalbar__area { font-size: 13px; color: #c7d2fe; }
 .totalbar__cost { font-size: 18px; font-weight: 800; letter-spacing: .2px; }
 
 /* 10b. Item search modal ------------------------------------------ */
-.modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; justify-content: center; }
+.modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; justify-content: center; overscroll-behavior: contain; }
 .modal__backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, .5); }
 .modal__panel {
   position: relative;
   width: 100%;
-  max-width: 480px;
-  max-height: 80vh;
+  max-width: 560px;
+  max-height: 80vh;          /* fallback for browsers without dvh */
+  max-height: 90dvh;         /* dvh follows the visible area, so the sheet
+                                stays fully usable when the keyboard is open */
   display: flex;
   flex-direction: column;
   background: var(--card);
@@ -588,7 +636,15 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
   cursor: pointer;
 }
 .modal__close:hover { background: var(--bg); }
-.modal__results { list-style: none; margin: 0; padding: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.modal__results {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;  /* keep touch-scroll inside the list — don't
+                                    chain to the modal or the page behind it */
+}
 .item-row {
   width: 100%;
   display: flex;
@@ -611,6 +667,45 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 @media (min-width: 640px) {
   .modal { align-items: center; }
   .modal__panel { border-radius: 16px; }
+}
+/* While a modal is open, freeze the page underneath so touch-scrolling the
+   item list can never move the background form. Toggled from ui.js. */
+body.modal-open { overflow: hidden; }
+
+/* Blocking activity overlay (publish, refresh items). Spinner keyframes live in
+   the inlined splash styles in index.html so they exist at first paint. */
+.busy { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, .45); }
+.busy[hidden] { display: none; }
+.busy__box {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  min-width: 200px; max-width: 80vw;
+  padding: 24px 28px;
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.busy .spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--brand);
+  animation: spin .8s linear infinite;
+}
+.busy__text { font-size: 14px; font-weight: 600; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .busy .spinner { animation-duration: 1.6s; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Custom confirm/prompt dialog — reuses .modal / .modal__panel (bottom sheet
+   on phones, centred card on wider screens). Replaces native alert popups. */
+.dialog { padding: 20px 20px calc(20px + env(safe-area-inset-bottom)); gap: 14px; }
+.dialog__title { margin: 0; font-size: 18px; font-weight: 700; color: var(--ink); }
+.dialog__title:empty { display: none; }
+.dialog__message { margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
+.dialog__message:empty { display: none; }
+.dialog__input { margin-top: 2px; }
+.dialog__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+.dialog__actions .btn { flex: 1 1 auto; min-width: 120px; padding: 0 14px; }
+@media (min-width: 640px) {
+  .dialog__actions .btn { flex: 0 0 auto; }
 }
 
 /* 11. Toast -------------------------------------------------------- */
@@ -646,6 +741,24 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 .toast__x:hover { color: #fff; }
 
 /* 12. Responsive --------------------------------------------------- */
+/* Phones: a tighter, calmer layout so more of the form is visible — especially
+   with the on-screen keyboard up. Tablet/desktop (>=600px) keep their spacing.
+   The room band's negative margin tracks the smaller room padding here. */
+@media (max-width: 599px) {
+  .container { padding: 12px; }
+  .card { padding: 14px; }
+
+  .room { padding: 12px; margin-bottom: 16px; }
+  .room__head { margin: -12px -12px 12px; padding: 7px 40px 7px 12px; }
+  .room__name { font-size: 16px; min-height: 34px; }
+  .room__actions { margin-top: 10px; }
+
+  .surfaces { gap: 10px; }
+  .surface { padding: 12px; }
+  .surface__top { margin-bottom: 12px; }
+  .surface__item { margin-top: 8px; }
+}
+
 @media (min-width: 600px) {
   /* Wider screens: Length / Width / Cost grow to fill the row (equal width). */
   .surface__fields .field { flex: 1 1 0; }
