@@ -10,7 +10,7 @@
  * instead of a stale cached copy.
  */
 
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v6";
 const CACHE_NAME = `sms-estimator-${CACHE_VERSION}`;
 
 // The files that make up the app shell. Paths are relative to this file,
@@ -18,6 +18,7 @@ const CACHE_NAME = `sms-estimator-${CACHE_VERSION}`;
 const APP_SHELL = [
   "index.html",
   "assets/css/estimator.css",
+  "assets/js/splash-failsafe.js",
   "assets/js/calc/app.js",
   "assets/js/calc/auth.js",
   "assets/js/calc/config.js",

@@ -33,7 +33,9 @@
         transition: opacity .35s ease, visibility .35s ease;
       }
       #splash.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
-      #splash img { width: 96px; height: auto; }
+      /* Logo on a clean white card (like the top bar) so its grey text reads
+         crisply on the navy — professional, no fuzzy halo. */
+      #splash img { width: 150px; height: auto; background: #fff; padding: 16px 20px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, .22); }
       #splash .splash-text { color: rgba(255,255,255,.85); font: 600 14px/1.4 system-ui, sans-serif; letter-spacing: .02em; }
       .spinner {
         width: 38px; height: 38px; border-radius: 50%;
@@ -43,6 +45,12 @@
       @keyframes spin { to { transform: rotate(360deg); } }
       @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.6s; } }
     </style>
+
+    <!-- Splash failsafe: a classic (non-module) script so it runs even if the
+         ES-module app.js fails to load. If the app hasn't removed the splash in
+         time, it removes it anyway so the user lands on the login/app screen
+         underneath instead of an endless spinner. -->
+    <script src="assets/js/splash-failsafe.js"></script>
 </head>
 
 <body>

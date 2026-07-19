@@ -107,6 +107,8 @@ function roomDetail(room) {
       const u = surface.dimUnit === "in" ? "in" : "ft";
       const measure = surface.isUnit
         ? `Qty ${n(surface.qty)}`
+        : surface.isLinear
+        ? `Length ${n(surface.dim1)} ${u} &nbsp;·&nbsp; ${surface.length.toFixed(2)} RFT`
         : `${k.dim1} ${n(surface.dim1)} ${u} × ${k.dim2} ${n(surface.dim2)} ${u} &nbsp;·&nbsp; ${surface.area.toFixed(2)} sq.ft.`;
       return `
         <tr class="${surface.isSubtract ? "q-row--sub" : ""}">

@@ -745,8 +745,15 @@ body.modal-open { overflow: hidden; }
    with the on-screen keyboard up. Tablet/desktop (>=600px) keep their spacing.
    The room band's negative margin tracks the smaller room padding here. */
 @media (max-width: 599px) {
-  .container { padding: 12px; }
+  /* Keep the tighter phone padding, but preserve the bottom clearance that
+     stops the fixed total bar from covering the last content (e.g. the Publish
+     button on the Quote tab). */
+  .container { padding: 12px; padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
   .card { padding: 14px; }
+
+  /* Room to scroll the last items of the picker up above the on-screen keyboard
+     (the sheet extends behind it), so you can tap them without closing it. */
+  .modal__results { padding-bottom: 42vh; }
 
   .room { padding: 12px; margin-bottom: 16px; }
   .room__head { margin: -12px -12px 12px; padding: 7px 40px 7px 12px; }
