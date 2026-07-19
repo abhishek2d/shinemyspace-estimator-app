@@ -6,15 +6,17 @@
  *     the UI so the calculator/print/save work offline for ACCESS_MAX_AGE_DAYS
  *     after the first sign-in. It carries no token — losing it leaks nothing.
  *
- *  2. GOOGLE TOKEN (in-memory only, ~1hr, fetched on demand)
+ *  2. GOOGLE TOKEN (localStorage, ~1hr TTL, fetched on demand)
  *     The real Google ID token is needed ONLY to call the backend (live items /
- *     publish to Zoho). It is never written to disk. We obtain a fresh one when
- *     needed via Google Identity Services — silently if the user still has an
- *     active Google session (the usual case), otherwise with a quick prompt.
+ *     publish to Zoho). It's kept in localStorage so it survives a refresh, but
+ *     is treated as expired after ~50 min and then re-fetched via Google
+ *     Identity Services — silently if the user still has an active Google
+ *     session (the usual case), otherwise with a quick prompt.
  *
- * Security: the sensitive token's lifetime on the device drops from 7 days to
- * ~1 hour in memory, and the backend re-verifies it (signature + allowlist) on
- * every call regardless. App entry was never the security boundary — the API is.
+ * Security: the sensitive token's lifetime on the device drops from 7 days
+ * (old design) to ~1 hour in localStorage, and the backend re-verifies it
+ * (signature + audience + allowlist) on every call regardless. App entry was
+ * never the security boundary — the API is.
  */
 
 import { API_URL, ACCESS_KEY, LEGACY_SESSION_KEY, ACCESS_MAX_AGE_DAYS, TOKEN_KEY } from "./config.js";
