@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+
+    <!-- Content-Security-Policy: only our own files, Google Sign-In, and our API
+         may load/run/connect. script-src has NO 'unsafe-inline', so an injected
+         <script> or stolen-token exfiltration to another host is blocked.
+         (Strongest as an HTTP header on Hostinger too — see .htaccess note.) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style 'unsafe-inline'; img-src 'self' https://*.googleusercontent.com data:; connect-src 'self' https://accounts.google.com/gsi/ https://api.shinemyspace.com http://localhost:3000 https://api-shinemyspace.onrender.com; frame-src https://accounts.google.com/gsi/; worker-src 'self'; object-src 'none'; base-uri 'self'">
+
+    <title>ShineMySpace Cost Calculator</title>
+
+    <!-- Browser address-bar colour and bookmark icon (no app install) -->
+    <meta name="theme-color" content="#1e3a8a">
+    <link rel="apple-touch-icon" href="assets/images/shine-my-space-logo.png">
+
+    <link rel="icon" type="image/x-icon" href="assets/images/favicon.ico">
+    <link rel="stylesheet" type="text/css" href="assets/css/estimator.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+
+<body>
+
+    <!-- Google Sign-In gate (hidden once signed in) -->
+    <div id="login-gate" class="login-gate">
+        <div class="login-card">
+            <img src="assets/images/shine-my-space-logo.png" alt="ShineMySpace" class="login-logo">
+            <h1 class="login-title">Cost Calculator</h1>
+            <p class="login-sub">Sign in with your Google account</p>
+            <div id="g_id_onload"
+                 data-client_id="451307200394-gtg7tb7f22lh27rkpusfd7hhvac63nb6.apps.googleusercontent.com"
+                 data-callback="handleCredentialResponse"
+                 data-auto_select="true"
+                 data-itp_support="true">
+            </div>
+            <div class="g_id_signin" data-type="standard"></div>
+            <p id="login-error" class="login-error" role="alert"></p>
+        </div>
+    </div>
+
+    <!-- The calculator (hidden until the gate is passed) -->
+    <div id="app" hidden>
+        <header class="topbar">
+            <div class="topbar__brand">
+                <img src="assets/images/shine-my-space-logo.png" alt="ShineMySpace" class="topbar__logo">
+                <!-- Backend server status: green Online / amber Waking… / red Offline -->
+                <span id="server-status" class="server-status" role="status" aria-live="polite" title="Backend server status">
+                    <span class="server-dot"></span>
+                    <span class="server-label">…</span>
+                </span>
+            </div>
+            <div class="topbar__actions">
+                <button id="new-estimate" class="btn btn--ghost btn--sm" type="button">＋ New Estimate</button>
+                <div class="menu">
+                    <button id="menu-btn" class="topbar__menu-btn" type="button"
+                            aria-label="Menu" aria-haspopup="true" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </button>
+                    <div id="menu-panel" class="menu__panel" hidden role="menu">
+                        <div class="menu__user">
+                            <span id="auth-dot-lg" class="auth-dot auth-dot--lg" aria-hidden="true"></span>
+                            <span class="menu__user-info">
+                                <span id="menu-user-name" class="menu__user-name"></span>
+                                <span id="menu-user-email" class="menu__user-email"></span>
+                            </span>
+                        </div>
+                        <button class="menu__item" data-action="auth" type="button" role="menuitem"></button>
+                        <button class="menu__item" data-action="view-items" type="button" role="menuitem"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span>View items</span></button>
+                        <button class="menu__item" data-action="sync-items" type="button" role="menuitem"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>Refresh items</span></button>
+                        <button class="menu__item" data-action="lock" type="button" role="menuitem"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>Lock app</span></button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Edit / Quote view switcher (segmented control) -->
+        <nav id="tabs" class="tabs" role="tablist">
+            <div class="tabs__track">
+                <button class="tab" data-view="edit" type="button">✏️ Edit</button>
+                <button class="tab" data-view="summary" type="button">📄 Quote</button>
+            </div>
+        </nav>
+
+        <main class="container">
+
+            <!-- EDIT VIEW -->
+            <section id="view-edit" class="view">
+                <div class="card card--customer">
+                    <label class="field field--full">
+                        <span class="field__label">Customer name / Title</span>
+                        <input id="customer" class="field__input" type="text"
+                               placeholder="e.g. Mr Abhishek Singh" aria-label="Customer name">
+                    </label>
+                </div>
+
+                <div id="rooms"></div>
+
+                <div class="primary-actions">
+                    <button id="add-room" class="btn btn--add" type="button">+ Add Room</button>
+                </div>
+
+                <!-- Save & backup -->
+                <div class="card">
+                    <h2 class="card__title">Save &amp; Backup</h2>
+                    <div class="data-actions">
+                        <button id="save" class="btn btn--ok" type="button">💾 Save on this phone</button>
+                        <div class="btn-pair">
+                            <button id="export" class="btn btn--ghost" type="button"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Export</button>
+                            <button id="import" class="btn btn--ghost" type="button"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import</button>
+                            <input id="import-file" type="file" accept="application/json,.json" hidden>
+                        </div>
+                    </div>
+                    <h3 class="card__subtitle">Saved estimates</h3>
+                    <div id="saved-list" class="saved-list"></div>
+                </div>
+            </section>
+
+            <!-- SUMMARY VIEW -->
+            <section id="view-summary" class="view" hidden>
+                <div id="result" class="result"></div>
+                <div class="primary-actions">
+                    <button id="publish-zoho" class="btn btn--primary" type="button"><img src="assets/images/zoho-books.png" alt="" class="btn__logo"> Publish to Zoho Books</button>
+                    <button id="print" class="btn btn--secondary" type="button">🖨️ Save as PDF</button>
+                </div>
+                <p id="publish-hint" class="publish-hint" hidden></p>
+            </section>
+
+        </main>
+        <br/><br/>
+
+        <!-- Sticky running total (visible in both tabs) -->
+        <div id="total-bar" class="totalbar"></div>
+
+        <!-- Transient confirmation message -->
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- Quotation rendered here for printing (hidden on screen, shown only when printing) -->
+    <div id="print-area" aria-hidden="true"></div>
+
+    <!-- Sign-in dialog: shown in-app when a fresh Google token is needed
+         (e.g. to publish) and we don't already hold one. -->
+    <div id="signin-modal" class="modal" hidden>
+        <div class="modal__backdrop" data-close></div>
+        <div class="modal__panel" role="dialog" aria-modal="true" aria-label="Sign in with Google">
+            <p class="signin-modal__text">Sign in with Google to publish to Zoho Books.</p>
+            <div id="signin-btn" class="signin-modal__btn"></div>
+            <button class="btn btn--ghost btn--sm" data-close type="button">Cancel</button>
+        </div>
+    </div>
+
+    <!-- All-items reference list (menu → View items): shows every item with its
+         status so the team can see why one isn't available in the picker. -->
+    <div id="items-list-modal" class="modal" hidden>
+        <div class="modal__backdrop" data-close></div>
+        <div class="modal__panel" role="dialog" aria-modal="true" aria-label="All items">
+            <div class="modal__head">
+                <input id="items-list-search" class="modal__search" type="text" placeholder="Search all items…"
+                       autocomplete="off" aria-label="Search all items">
+                <button class="modal__close" data-close type="button" aria-label="Close">✕</button>
+            </div>
+            <div class="items-list__filters" id="items-list-filters">
+                <button class="chip-filter is-active" data-filter="all" type="button">All</button>
+                <button class="chip-filter" data-filter="available" type="button">Available</button>
+                <button class="chip-filter" data-filter="purchase" type="button">Purchase only</button>
+                <button class="chip-filter" data-filter="inactive" type="button">Inactive</button>
+            </div>
+            <ul id="items-list-results" class="modal__results items-list"></ul>
+        </div>
+    </div>
+
+    <!-- Item search modal (opens from a surface's search button) -->
+    <div id="item-modal" class="modal" hidden>
+        <div class="modal__backdrop" data-close></div>
+        <div class="modal__panel" role="dialog" aria-modal="true" aria-label="Select an item">
+            <div class="modal__head">
+                <input id="item-search" class="modal__search" type="text" placeholder="Search items…"
+                       autocomplete="off" aria-label="Search items">
+                <button id="item-modal-close" class="modal__close" data-close type="button" aria-label="Close">✕</button>
+            </div>
+            <ul id="item-results" class="modal__results"></ul>
+        </div>
+    </div>
+
+    <script type="module" src="assets/js/calc/app.js"></script>
+
+</body>
+
+</html>

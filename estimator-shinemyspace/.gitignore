@@ -1,0 +1,11 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+
+# Dependencies (none needed — this is a zero-dependency static app — but just in case)
+node_modules/
+
+# Secrets (this frontend has none, but never commit one if added later)
+.env
+.env.*

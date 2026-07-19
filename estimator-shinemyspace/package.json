@@ -1,0 +1,11 @@
+{
+  "name": "estimator-shinemyspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ShineMySpace estimator frontend (static). dev-server.js is for LOCAL testing only; production is plain static hosting.",
+  "scripts": {
+    "start": "node dev-server.js",
+    "dev": "node dev-server.js"
+  }
+}

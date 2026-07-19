@@ -1,0 +1,31 @@
+# ============================================================
+#  Production config for the estimator frontend (Hostinger / Apache-compatible).
+#  This is served-folder configuration only — it runs no application code.
+# ============================================================
+
+<IfModule mod_headers.c>
+  # REQUIRED for Google Sign-In: the sign-in popup posts the credential back to
+  # this page, which needs COOP = same-origin-allow-popups. COOP can ONLY be an
+  # HTTP header (a <meta> tag does not work), so it must live here in production.
+  Header always set Cross-Origin-Opener-Policy "same-origin-allow-popups"
+
+  # General hardening.
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "no-referrer"
+
+  # Force HTTPS for a year (safe once the subdomain's SSL certificate is active,
+  # which Hostinger provisions automatically).
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+# ── Block public access to dev-only / non-web files ──────────
+# These may exist on the server after a git deploy, but must never be served.
+<FilesMatch "(^dev-server\.js$|^package(-lock)?\.json$|\.md$)">
+  Require all denied
+</FilesMatch>
+
+# ── Block all dot-files (.git metadata, .env, etc.) ──────────
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
