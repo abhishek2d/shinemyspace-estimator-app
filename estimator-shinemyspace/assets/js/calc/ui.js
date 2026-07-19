@@ -19,7 +19,7 @@
 import * as state from "./state.js";
 import * as library from "./library.js";
 import * as items from "./items.js";
-import { computeEstimate, formatMoney, formatArea, toFeet, pricingBasis, KINDS } from "./calculator.js";
+import { computeEstimate, formatMoney, formatArea, formatLength, toFeet, pricingBasis, KINDS } from "./calculator.js";
 import { API_URL } from "./config.js";
 import { hasFreshToken, getToken, getUser, awaitCredential, cancelPending, signOutGoogle, clearAccess } from "./auth.js";
 
@@ -175,25 +175,31 @@ function roomCard(room, index) {
 function surfaceRow(surface) {
   const k = KINDS[surface.kind];
   const isSub = surface.kind === "subtract";
-  // Mode (Area vs Qty) is derived from the picked item's unit — there's no
-  // manual toggle. A surface with no item yet stays in Area (dimension) mode.
+  // Mode is derived from the picked item's unit — there's no manual toggle.
+  //   unit   → Qty; linear → a single Length (RFT); otherwise Area (L×W).
+  // A surface with no item yet stays in Area (dimension) mode.
   const isUnit = surface.mode === "unit";
+  const isLinear = surface.mode === "linear";
   const unit = surface.dimUnit === "in" ? "in" : "ft";
   const itemName = (surface.itemName || "").trim();
 
-  // Area mode: Length × Width (in ft or in) × rate/sqft. Qty mode: Qty × rate.
+  // Area: Length × Width (ft/in) × rate/sqft. Qty: Qty × rate. Linear: a single
+  // Length (ft/in) × rate/RFT.
   const fields = isUnit
     ? `${field("Quantity", "qty", surface.qty)}
        ${field("Cost/unit", "costPerSqft", surface.costPerSqft)}`
+    : isLinear
+    ? `${dimField("Length", "dim1", surface.dim1, unit)}
+       ${field("Cost/RFT", "costPerSqft", surface.costPerSqft)}`
     : `${dimField(k.dim1, "dim1", surface.dim1, unit)}
        ${dimField(k.dim2, "dim2", surface.dim2, unit)}
        ${field("Cost/sqft", "costPerSqft", surface.costPerSqft)}`;
 
-  // In Area mode, let the user pick the unit their measurements are in. Qty mode
-  // has no dimensions, so no unit switch is shown.
+  // Area and Linear modes measure a length, so offer the ft/in switch. Qty mode
+  // has no dimension, so no switch is shown.
   const unitToggle = isUnit
     ? ""
-    : `<div class="mode-toggle" role="group" aria-label="Measurement unit" title="Units your Length/Width are measured in">
+    : `<div class="mode-toggle" role="group" aria-label="Measurement unit" title="Units your measurements are in">
         <button class="mode-toggle__opt ${unit === "ft" ? "is-active" : ""}" data-action="dimunit" data-unit="ft" type="button">ft</button>
         <button class="mode-toggle__opt ${unit === "in" ? "is-active" : ""}" data-action="dimunit" data-unit="in" type="button">in</button>
       </div>`;
@@ -261,11 +267,14 @@ function renderResults() {
   const model = computeEstimate(state.getState());
   const date = formatDate(model.date);
 
-  // Header tiles: Area, plus Quantity when the estimate has any unit-mode items.
+  // Header tiles: Area, plus Length (RFT) and/or Quantity when the estimate has
+  // any linear- or unit-mode items. Area shows by default when nothing else does.
   const hasQty = model.totalQty > 0;
-  const hasArea = model.totalArea > 0 || !hasQty;
+  const hasLength = model.totalLength > 0;
+  const hasArea = model.totalArea > 0 || (!hasQty && !hasLength);
   const metrics = [];
   if (hasArea) metrics.push({ label: "Area", value: formatArea(model.totalArea) });
+  if (hasLength) metrics.push({ label: "Length", value: formatLength(model.totalLength) });
   if (hasQty) metrics.push({ label: "Quantity", value: `${model.totalQty.toLocaleString("en-IN")} qty` });
   const metricsHtml = metrics
     .map(
@@ -305,7 +314,7 @@ function renderResults() {
             <tfoot>
               ${kindSubtotalRows(room)}
               <tr class="quote-total-row">
-                <td>Total <span class="quote-foot__area">· ${measures(room.area, room.qty)}</span></td>
+                <td>Total <span class="quote-foot__area">· ${measures(room.area, room.qty, room.length)}</span></td>
                 <td class="num">${formatMoney(room.cost)}</td>
               </tr>
             </tfoot>
@@ -317,7 +326,7 @@ function renderResults() {
   el.result.innerHTML = summary + rooms;
 
   el.totalBar.innerHTML = `
-    <span class="totalbar__area">${measures(model.totalArea, model.totalQty)}</span>
+    <span class="totalbar__area">${measures(model.totalArea, model.totalQty, model.totalLength)}</span>
     <span class="totalbar__cost">${formatMoney(model.totalCost)}</span>`;
 }
 
@@ -330,6 +339,9 @@ function resultRow(surface) {
   const detail = surface.isUnit
     ? `<div class="quote-item__dims">Qty ${n(surface.qty)}</div>
         <div class="quote-item__calc">@ ₹${rate}/unit</div>`
+    : surface.isLinear
+    ? `<div class="quote-item__dims">Length ${n(surface.dim1)} ${u}</div>
+        <div class="quote-item__calc">${formatLength(surface.length)} · @ ₹${rate}/RFT</div>`
     : `<div class="quote-item__dims">${k.dim1} ${n(surface.dim1)} × ${k.dim2} ${n(surface.dim2)} ${u}</div>
         <div class="quote-item__calc">${formatArea(surface.area)} · @ ₹${rate}/sqft</div>`;
   const warn = surface.overDeduct
@@ -745,9 +757,9 @@ function renderItemResults(query) {
 
 /**
  * Apply the chosen item to the target surface: name, rate, unit, id, and the
- * mode its pricing implies. Integrity guard: an item the app can't price safely
- * (per-length units — see pricingBasis) is refused here so a bad quantity can
- * never reach a surface or Zoho.
+ * measurement mode its pricing implies — area units → Area (L×W), per-length
+ * units (RFT/ft/…) → Linear (a single length), everything else → Qty. Keeps the
+ * billed quantity matched to what the item actually sells by.
  */
 function selectItem(itemId) {
   const item = items.findById(itemId);
@@ -758,23 +770,13 @@ function selectItem(itemId) {
   }
 
   const basis = pricingBasis(item.unit); // "area" | "count" | "linear"
-  if (basis === "linear") {
-    closeItemModal();
-    toast(
-      `"${item.name}" is priced per ${item.unit} (a length). Measuring by length ` +
-        `isn't supported yet — pick a per-sqft or per-piece item.`,
-      { error: true }
-    );
-    return;
-  }
+  const mode = basis === "area" ? "area" : basis === "linear" ? "linear" : "unit";
 
   state.updateSurface(roomId, surfaceId, "item_id", item.item_id);
   state.updateSurface(roomId, surfaceId, "itemName", item.name);
   state.updateSurface(roomId, surfaceId, "itemUnit", item.unit || "");
   state.updateSurface(roomId, surfaceId, "costPerSqft", item.rate);
-  // Strictly follow the item's pricing type: area units → Area (L×W), everything
-  // else → Qty. Keeps the billed quantity matched to what the item sells by.
-  state.updateSurface(roomId, surfaceId, "mode", basis === "area" ? "area" : "unit");
+  state.updateSurface(roomId, surfaceId, "mode", mode);
   closeItemModal();
   renderForm();
   renderResults();
@@ -1451,9 +1453,10 @@ function n(value) {
  *   "3 qty"                (unit only)
  * Shows area alone when neither is present, so it's never blank.
  */
-function measures(area, qty) {
+function measures(area, qty, length = 0) {
   const parts = [];
   if (area > 0) parts.push(formatArea(area));
+  if (length > 0) parts.push(formatLength(length));
   if (qty > 0) parts.push(`${qty.toLocaleString("en-IN")} qty`);
   return parts.length ? parts.join(" / ") : formatArea(area);
 }
@@ -1470,7 +1473,7 @@ function kindSubtotalRows(room) {
     .map((k) => {
       const b = room.byKind[k];
       return `<tr class="quote-subtotal-row quote-subtotal-row--${k}">
-                <td>${KIND_LABELS[k] || KINDS[k].title} <span class="quote-foot__area">· ${measuresSigned(b.area, b.qty)}</span></td>
+                <td>${KIND_LABELS[k] || KINDS[k].title} <span class="quote-foot__area">· ${measuresSigned(b.area, b.qty, b.length)}</span></td>
                 <td class="num">${moneySigned(b.cost)}</td>
               </tr>`;
     })
@@ -1478,9 +1481,10 @@ function kindSubtotalRows(room) {
 }
 
 /** Like measures(), but keeps a sign so deduct subtotals read as negative. */
-function measuresSigned(area, qty) {
+function measuresSigned(area, qty, length = 0) {
   const parts = [];
   if (area) parts.push((area < 0 ? "−" : "") + formatArea(Math.abs(area)));
+  if (length) parts.push((length < 0 ? "−" : "") + formatLength(Math.abs(length)));
   if (qty) parts.push((qty < 0 ? "−" : "") + `${Math.abs(qty).toLocaleString("en-IN")} qty`);
   return parts.length ? parts.join(" / ") : formatArea(0);
 }

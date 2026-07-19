@@ -57,9 +57,8 @@ export function dimUnitOf(surface) {
  * matches what was measured:
  *   "area"   — per square unit (sqft): quantity = area in sqft.
  *   "count"  — per piece (pcs, nos, set, box, …): quantity = qty.
- *   "linear" — per running length (ft, inch, metre, rft, …): needs a single
- *              length, which this app can't yet measure → publishing is blocked
- *              rather than billing a wrong number.
+ *   "linear" — per running length (RFT, ft, metre, …): quantity = a single
+ *              length measured in feet (the "linear" surface mode).
  * A blank/legacy unit is treated as "count" (the historic non-sqft default).
  */
 const LINEAR_UNITS = new Set([
@@ -88,28 +87,33 @@ export function computeEstimate(state) {
   let totalArea = 0;
   let totalCost = 0;
   let totalQty = 0;
+  let totalLength = 0;
 
   const rooms = state.rooms.map((room, index) => {
     let roomArea = 0;
     let roomCost = 0;
     let roomQty = 0;
+    let roomLength = 0;
 
     const surfaces = room.surfaces.map((surface) => {
       const isSubtract = KINDS[surface.kind].subtract;
       const isUnit = surface.mode === "unit";
+      const isLinear = surface.mode === "linear";
       const dimUnit = dimUnitOf(surface);
       const rate = num(surface.costPerSqft);
-      // Per-unit surfaces have no square footage — they add cost but not area.
-      // Area mode converts each dimension to feet first, so inches price the
-      // same sqft the customer measured.
+      // Three measurement modes:
+      //   area   — Length × Width (converted to feet) × rate/sqft
+      //   unit   — Qty × rate/unit (no size)
+      //   linear — a single length in running feet (dim1) × rate/RFT
       const qty = isUnit ? num(surface.qty) : 0;
-      const area = isUnit ? 0 : toFeet(surface.dim1, dimUnit) * toFeet(surface.dim2, dimUnit);
-      const cost = isUnit ? qty * rate : area * rate;
+      const length = isLinear ? toFeet(surface.dim1, dimUnit) : 0; // running feet
+      const area = isUnit || isLinear ? 0 : toFeet(surface.dim1, dimUnit) * toFeet(surface.dim2, dimUnit);
+      const cost = isUnit ? qty * rate : isLinear ? length * rate : area * rate;
 
       // pricedQty is the exact magnitude billed to Zoho for this surface, from
       // the same numbers shown on screen — the single source of truth so the
       // quote, the totals and the published quantity can never disagree.
-      const pricedQty = isUnit ? qty : area;
+      const pricedQty = isUnit ? qty : isLinear ? length : area;
 
       // Integrity: when an item's selling unit is known, it must match how this
       // surface is measured. pricingOk=false means we can't bill it safely and
@@ -119,34 +123,37 @@ export function computeEstimate(state) {
       const knownUnit = surface.item_id && String(surface.itemUnit || "").trim() !== "";
       const basis = knownUnit ? pricingBasis(surface.itemUnit) : null;
       let pricingOk = true;
-      if (basis === "area" && isUnit) pricingOk = false; // per-sqft item on a Qty surface
-      else if (basis === "count" && !isUnit) pricingOk = false; // per-piece item on an Area surface
-      else if (basis === "linear") pricingOk = false; // per-length pricing not supported yet
+      if (basis === "area" && (isUnit || isLinear)) pricingOk = false; // per-sqft item measured otherwise
+      else if (basis === "count" && !isUnit) pricingOk = false; // per-piece item not on a Qty surface
+      else if (basis === "linear" && !isLinear) pricingOk = false; // per-length item not on a length surface
 
       roomArea += isSubtract ? -area : area;
       roomCost += isSubtract ? -cost : cost;
       roomQty += isSubtract ? -qty : qty;
+      roomLength += isSubtract ? -length : length;
 
       return {
         ...surface,
         label: surfaceLabel(surface),
-        area, cost, qty, dimUnit, pricedQty, pricingBasis: basis, pricingOk,
-        isUnit, isSubtract,
+        area, cost, qty, length, dimUnit, pricedQty, pricingBasis: basis, pricingOk,
+        isUnit, isLinear, isSubtract,
       };
     });
 
     totalArea += roomArea;
     totalCost += roomCost;
     totalQty += roomQty;
+    totalLength += roomLength;
 
     // Per-surface-type subtotals for the room footer (Ceiling / Walls / Deducts).
     // Signed so subtract kinds are negative and the parts sum to the room total.
     const byKind = {};
     surfaces.forEach((s) => {
-      const k = byKind[s.kind] || (byKind[s.kind] = { area: 0, qty: 0, cost: 0 });
+      const k = byKind[s.kind] || (byKind[s.kind] = { area: 0, qty: 0, length: 0, cost: 0 });
       const sign = s.isSubtract ? -1 : 1;
       k.area += sign * s.area;
       k.qty += sign * s.qty;
+      k.length += sign * s.length;
       k.cost += sign * s.cost;
     });
 
@@ -175,10 +182,11 @@ export function computeEstimate(state) {
       area: roomArea,
       cost: roomCost,
       qty: roomQty,
+      length: roomLength,
     };
   });
 
-  return { customer: state.customer || "", date: state.date || "", rooms, totalArea, totalCost, totalQty };
+  return { customer: state.customer || "", date: state.date || "", rooms, totalArea, totalCost, totalQty, totalLength };
 }
 
 /** Format a number as Indian Rupees, e.g. 12500 -> "₹12,500". */
@@ -189,4 +197,9 @@ export function formatMoney(value) {
 /** Format an area value, e.g. 120 -> "120 sq. ft." */
 export function formatArea(value) {
   return value.toLocaleString(CURRENCY) + " sq. ft.";
+}
+
+/** Format a running-length value, e.g. 12 -> "12 RFT". */
+export function formatLength(value) {
+  return value.toLocaleString(CURRENCY) + " RFT";
 }

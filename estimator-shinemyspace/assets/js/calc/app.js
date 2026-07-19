@@ -76,8 +76,16 @@ function enterApp() {
   clearInterval(gateWarmTimer); // stop the gate warm-up; ui.init takes over
   $("login-gate").hidden = true;
   $("app").hidden = false;
-  startApp();
-  hideSplash();
+  // Always take the splash down, even if startup throws — otherwise a render
+  // error would trap the user on the spinner. (The standalone splash-failsafe
+  // is the outer safety net for when the module itself never loads.)
+  try {
+    startApp();
+  } catch (err) {
+    console.error("[App] startup failed:", err);
+  } finally {
+    hideSplash();
+  }
 }
 
 /** Fade out and remove the first-paint loading screen once the app is ready. */
